@@ -1,0 +1,6 @@
+.env
+images
+__pycache__
+*.log
+*workspace*
+.DS_Store
