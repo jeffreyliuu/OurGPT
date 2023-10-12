@@ -1,2 +1,2 @@
-# chatgpt-bot
-Personalized OpenAI bot that interacts with users
+# OurGPT
+Personalized OpenAI bot that interacts with users on discord

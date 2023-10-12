@@ -1,10 +1,18 @@
-version: "1"
+version: "3"
 
 services:
-  chatgpt-discord-bot:
+  ourgpt:
     build: .
-    image: chatgpt-discord-bot
-    container_name: chatgpt-discord-bot
+    image: ourgpt
+    container_name: ourgpt
     env_file:
       - .env
     restart: unless-stopped
+    depends_on:
+      - mongodb
+
+  mongodb:
+    image: mongo
+    container_name: mongodb
+    ports:
+      - "27017:27017"
