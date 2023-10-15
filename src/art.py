@@ -2,7 +2,7 @@
 Module responsible for the AI Art generation using Dalle2
 
 Returns:
-    _type_: _description_
+    The path to the generated 512 x 512 image
 """
 import os
 import json

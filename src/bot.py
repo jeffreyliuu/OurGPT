@@ -10,11 +10,14 @@ from random import randrange
 from src.aclient import client
 from discord import app_commands
 from pymongo import MongoClient
+from datetime import datetime
+
 
 from src import log, art, personas, responses
 
 
 def run_discord_bot():
+
     # Connect to MongoDB
     try:
         # Connect to MongoDB
@@ -40,8 +43,129 @@ def run_discord_bot():
         loop = asyncio.get_event_loop()
         loop.create_task(client.process_messages())
         logger.info(f'{client.user} is now running!')
+    
+    @client.tree.command(name="register", description="Register a new user with preferences")
+    async def register(interaction: discord.Interaction, *, name: str, major: str, preference1: str, preference2: str):
+        username = str(interaction.user)
+        try:
+            # Check if the user is already registered
+            existing_user = preferences_collection.find_one({"username": username})
 
+            if existing_user:
+                await interaction.response.send_message("You are already registered.")
+                return
 
+            # Get the current date and time
+            register_date = datetime.utcnow()
+
+            # Data to be inserted
+            data_to_insert = {
+                "username": username,
+                "major": major,
+                "preferences": [preference1, preference2],
+                "register_date": register_date
+            }
+
+            # Insert the data and check for errors
+            insert_result = preferences_collection.insert_one(data_to_insert)
+            if not insert_result.acknowledged:
+                await interaction.response.send_message("Failed to register.")
+                return
+
+            # Confirm registration to the user
+            await interaction.response.send_message(f"Successfully registered as {username}!")
+        except Exception as e:
+            await interaction.response.send_message(f"An error occurred: {str(e)}")
+
+    @client.tree.command(name="delete", description="Delete yourself from the database")
+    @app_commands.choices(confirm_deletion=[
+        app_commands.Choice(name="Yes", value=1),
+        app_commands.Choice(name="No", value=0),
+    ])
+    async def delete(interaction: discord.Interaction, confirm_deletion: app_commands.Choice[int]):
+        await interaction.response.defer(ephemeral=False)
+
+        username = str(interaction.user)
+
+        # Check if the user is in the database
+        existing_user = preferences_collection.find_one({"username": username})
+
+        if not existing_user:
+            await interaction.followup.send("You are not registered in the database.")
+            return
+
+        if confirm_deletion:
+            # Delete the user from the database
+            preferences_collection.delete_one({"username": username})
+
+            # Confirm deletion to the user
+            await interaction.followup.send("Your data has been deleted.")
+        else:
+            # Data has not been deleted
+            await interaction.followup.send("Your data deletion has been cancelled.")
+
+    @client.tree.command(name="list_users", description="See who is registered in the server")
+    async def list_users(interaction: discord.Interaction):
+        try:
+            # Fetch all documents from the database collection
+            all_users = preferences_collection.find({})
+
+            # Initialize message
+            message = "**Registered Users**\n```"
+
+            # Add table headers
+            message += f"{'Username':<20} | {'Register Date':<25}\n"
+            message += "-" * 48 + "\n"
+
+            # Add each user to the table
+            for user in all_users:
+                username = user.get("username", "N/A")
+                register_date = user.get("register_date", "N/A")
+                if isinstance(register_date, datetime):
+                    register_date = register_date.strftime('%Y-%m-%d %H:%M:%S')
+
+                message += f"{username:<20} | {register_date:<25}\n"
+
+            # Close code block
+            message += "```"
+
+            # Send the message
+            await interaction.response.send_message(message)
+        except Exception as e:
+            await interaction.response.send_message(f"An error occurred: {str(e)}")
+
+    @client.tree.command(name='add_preferences', description='Add multiple preferences for a registered user')
+    async def add_preferences(interaction: discord.Interaction, new_preferences: str):
+        try:
+            # Split the input string by spaces to get individual preferences
+            preferences_list = new_preferences.split()
+
+            # Fetch the username from the interaction (replace this based on your implementation)
+            username = str(interaction.user)
+
+            # Check if the user is already registered
+            existing_user = preferences_collection.find_one({"username": username})
+
+            if not existing_user:
+                await interaction.response.send_message("You are not registered. Please register first.")
+                return
+
+            # Add the new preferences to the existing preferences
+            update_result = preferences_collection.update_one(
+                {"username": username},
+                {"$addToSet": {"preferences": {"$each": preferences_list}}}
+            )
+
+            if update_result.modified_count == 0:
+                await interaction.response.send_message("Preferences already exist or failed to update.")
+                return
+
+            # Confirm the addition to the user
+            await interaction.response.send_message(f"Added new preferences: {', '.join(preferences_list)}")
+
+        except Exception as e:
+            await interaction.response.send_message(f"An error occurred: {str(e)}")
+        
     @client.tree.command(name="chat", description="Have a chat with ChatGPT")
     async def chat(interaction: discord.Interaction, *, message: str):
         if client.is_replying_all == "True":
@@ -60,19 +184,20 @@ def run_discord_bot():
         # Parse preferences
         user_preferences = preferences_collection.find_one({"username": username})
         if user_preferences:
-            traits = user_preferences.get('traits', [])
-            trait_str = ", ".join(traits)  # Convert list to string
+            preferences = user_preferences.get('preferences', [])
+            name = username
+            preferences_str = ", ".join(preferences)  # Convert list to string
 
-            if traits:
-                condensed_preferences = f"Given that you're {trait_str}, you asked: {message}"
+            if preferences:
+                condensed_preferences = f"These are my preferences: {preferences_str} I ask: {message}"
             else:
                 condensed_preferences = message
         else:
             condensed_preferences = message
         
         # Store interaction
-        interactions_collection.insert_one({"user_id": username, "interaction": message})
-        await client.enqueue_message(interaction, message)
+        interactions_collection.insert_one({"username": username, "interaction": message})
+        await client.enqueue_message(interaction, condensed_preferences)
 
 
     @client.tree.command(name="private", description="Toggle private access")
@@ -194,9 +319,11 @@ def run_discord_bot():
         - `/public` ChatGPT switch to public mode
         - `/replyall` ChatGPT switch between replyAll mode and default mode
         - `/reset` Clear ChatGPT conversation history
+        - `/register` Register yourself in the database for personalized messages
         - `/chat-model` Switch different chat model
                 `OFFICIAL`: GPT-3.5 model
                 `UNOFFICIAL`: Website ChatGPT
+        - `/delete` Remove yourself from the database
 
 For complete documentation, please visit:
 https://github.com/jeffreyliuu/OurGPT""")
